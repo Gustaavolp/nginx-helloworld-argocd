@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-helloworld-svc
+spec:
+  type: ClusterIP
+  selector:
+    app: nginx-helloworld
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
