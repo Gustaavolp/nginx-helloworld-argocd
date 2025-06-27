@@ -16,6 +16,6 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: gustaavolp/nginx-helloworld:v20250627-1428
+        image: gustaavolp/nginx-helloworld:v20250627-1435
         ports:
         - containerPort: 80
