@@ -1,38 +1,40 @@
 name: CI/CD Pipeline
-
 on:
   push:
     branches: [main]
-
 permissions:
   contents: write
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.vars.outputs.IMAGE_TAG }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-
+      
       - name: Login to DockerHub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-
+      
       - name: Generate IMAGE_TAG
         id: vars
         run: |
-          echo "IMAGE_TAG=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
-
+          IMAGE_TAG=$(date +'%Y%m%d%H%M%S')
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "Generated IMAGE_TAG: $IMAGE_TAG"
+      
       - name: Build and push images
         uses: docker/build-push-action@v4
         with:
           push: true
           tags: |
-            gustaavolp/nginx-helloworld:${{ env.IMAGE_TAG }}
+            gustaavolp/nginx-helloworld:${{ steps.vars.outputs.IMAGE_TAG }}
             gustaavolp/nginx-helloworld:latest
 
   update-manifests:
@@ -43,15 +45,38 @@ jobs:
         uses: actions/checkout@v3
         with:
           persist-credentials: true
-
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
       - name: Update deployment image tag
         run: |
-          sed -i "s|image:.*|image: gustaavolp/nginx-helloworld:${{ env.IMAGE_TAG }}|" k8s/deployment.yaml
-
+          # Backup do arquivo original
+          cp k8s/deployment.yaml k8s/deployment.yaml.bak
+          
+          # Atualizar a tag da imagem de forma mais segura
+          sed -i 's|gustaavolp/nginx-helloworld:[^[:space:]]*|gustaavolp/nginx-helloworld:${{ needs.build-and-push.outputs.image-tag }}|g' k8s/deployment.yaml
+          
+          # Verificar se o arquivo ainda é um YAML válido
+          if ! python3 -c "import yaml; yaml.safe_load(open('k8s/deployment.yaml', 'r'))" 2>/dev/null; then
+            echo "ERRO: deployment.yaml não é um YAML válido após a atualização"
+            mv k8s/deployment.yaml.bak k8s/deployment.yaml
+            exit 1
+          fi
+          
+          # Mostrar as mudanças
+          echo "Mudanças realizadas:"
+          diff k8s/deployment.yaml.bak k8s/deployment.yaml || true
+      
       - name: Commit and push manifests
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Verificar se houve mudanças
+          if git diff --quiet k8s/deployment.yaml; then
+            echo "Nenhuma mudança detectada no deployment.yaml"
+            exit 0
+          fi
+          
           git add k8s/deployment.yaml
-          git commit -m "ci: update image tag to ${{ env.IMAGE_TAG }}"
+          git commit -m "ci: update image tag to ${{ needs.build-and-push.outputs.image-tag }}"
           git push origin main
